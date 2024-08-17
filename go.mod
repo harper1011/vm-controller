@@ -1,6 +1,6 @@
 module github.com/harper1011/vm-controller
 
-go 1.22.0
+go 1.23
 
 require (
 	github.com/onsi/ginkgo/v2 v2.17.1
