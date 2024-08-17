@@ -1,0 +1,76 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: upcloudvms.infrastructure.github.com
+spec:
+  group: infrastructure.github.com
+  names:
+    kind: UpCloudVM
+    listKind: UpCloudVMList
+    plural: upcloudvms
+    singular: upcloudvm
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: UpCloudVM is the Schema for the upcloudvms API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: UpCloudVMSpec defines the desired state of UpCloudVM
+            properties:
+              cpu:
+                type: integer
+              memory:
+                type: integer
+              plan:
+                type: string
+              storage:
+                type: integer
+              template:
+                type: string
+              zone:
+                type: string
+            required:
+            - cpu
+            - memory
+            - plan
+            - storage
+            - template
+            - zone
+            type: object
+          status:
+            description: UpCloudVMStatus defines the observed state of UpCloudVM
+            properties:
+              ipAddress:
+                type: string
+              state:
+                type: string
+              vmID:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

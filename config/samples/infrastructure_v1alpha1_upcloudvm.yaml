@@ -1,0 +1,9 @@
+apiVersion: infrastructure.github.com/v1alpha1
+kind: UpCloudVM
+metadata:
+  labels:
+    app.kubernetes.io/name: vm-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: upcloudvm-sample
+spec:
+  # TODO(user): Add fields here
