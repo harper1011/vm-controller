@@ -39,7 +39,7 @@ func (r *UpCloudVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.Get(ctx, req.NamespacedName, &upCloudVM); err != nil {
 		if apiError.IsNotFound(err) {
 			// The resource was deleted
-			logger.Info("UpCloudVM resource not found. Ignoring since object must be deleted")
+			logger.Info("UpCloudVM resource not found. skip...")
 			return ctrl.Result{}, nil
 		}
 		// Error fetching the resource, requeue the request
@@ -51,6 +51,21 @@ func (r *UpCloudVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	err, svc := r.getservice()
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	// Handle deletion logic
+	if !upCloudVM.ObjectMeta.DeletionTimestamp.IsZero() {
+		logger.Info("Deleting UpCloud VM")
+		if err := r.deleteUpCloudVM(svc, &upCloudVM); err != nil {
+			logger.Error(err, "Failed to delete UpCloud VM")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Add finalizer for this CR
+	if !containsString(upCloudVM.GetFinalizers(), "upcloud.finalizer") {
+		if err := r.addFinalizer(ctx, &upCloudVM); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Create or update the UpCloud VM
@@ -81,15 +96,6 @@ func (r *UpCloudVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Handle deletion logic
-	if !upCloudVM.ObjectMeta.DeletionTimestamp.IsZero() {
-		logger.Info("Deleting UpCloud VM")
-		if err := r.deleteUpCloudVM(svc, &upCloudVM); err != nil {
-			logger.Error(err, "Failed to delete UpCloud VM")
-			return ctrl.Result{}, err
-		}
-	}
-
 	return ctrl.Result{}, nil
 }
 
@@ -109,6 +115,15 @@ func (r *UpCloudVMReconciler) getservice() (error, *service.Service) {
 	}
 	c := upCloudClient.New(username, password)
 	return nil, service.New(c)
+}
+
+// add Finalizer to resource
+func (r *UpCloudVMReconciler) addFinalizer(ctx context.Context, vm *v1alpha1.UpCloudVM) error {
+	vm.SetFinalizers(append(vm.GetFinalizers(), "upcloud.finalizer"))
+	if err := r.Update(ctx, vm); err != nil {
+		return err
+	}
+	return nil
 }
 
 // createUpCloudVM calls the UpCloud API to create a new VM
@@ -165,4 +180,25 @@ func (r *UpCloudVMReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.UpCloudVM{}).
 		Complete(r)
+}
+
+// Helper functions
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+func removeString(slice []string, s string) []string {
+	result := []string{}
+	for _, item := range slice {
+		if item == s {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
 }
