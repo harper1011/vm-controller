@@ -41,13 +41,31 @@ spec:
             properties:
               cpu:
                 type: integer
+              login_user:
+                description: LoginUser represents the login_user block when creating
+                  a new server
+                properties:
+                  create_password:
+                    type: string
+                  ssh_keys:
+                    description: |-
+                      SSHKeySlice is a slice of strings
+                      It exists to allow for a custom JSON unmarshaller.
+                    items:
+                      type: string
+                    type: array
+                  username:
+                    type: string
+                type: object
               memory:
                 type: integer
               plan:
                 type: string
-              storage:
+              storagesize:
                 type: integer
-              template:
+              storagetemplate:
+                type: string
+              user_data:
                 type: string
               zone:
                 type: string
@@ -55,8 +73,8 @@ spec:
             - cpu
             - memory
             - plan
-            - storage
-            - template
+            - storagesize
+            - storagetemplate
             - zone
             type: object
           status:

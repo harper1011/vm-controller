@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -25,12 +26,14 @@ import (
 
 // UpCloudVMSpec defines the desired state of UpCloudVM
 type UpCloudVMSpec struct {
-	CPU      int    `json:"cpu"`
-	Memory   int    `json:"memory"`
-	Storage  int    `json:"storage"`
-	Zone     string `json:"zone"`
-	Plan     string `json:"plan"`
-	Template string `json:"template"`
+	CPU             int                `json:"cpu"`
+	Memory          int                `json:"memory"`
+	StorageSize     int                `json:"storagesize"`
+	Zone            string             `json:"zone"`
+	Plan            string             `json:"plan"`
+	StorageTemplate string             `json:"storagetemplate"`
+	LoginUser       *request.LoginUser `json:"login_user,omitempty"`
+	UserData        string             `json:"user_data,omitempty"`
 }
 
 // UpCloudVMStatus defines the observed state of UpCloudVM

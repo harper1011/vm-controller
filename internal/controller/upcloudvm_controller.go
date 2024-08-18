@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/UpCloudLtd/upcloud-go-api/v6/upcloud"
 	upCloudClient "github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/client"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
@@ -48,7 +49,7 @@ func (r *UpCloudVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Initialize the UpCloud API client
-	err, svc := r.getservice()
+	err, svc := r.getService()
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -88,7 +89,7 @@ func (r *UpCloudVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	} else {
 		// Check and update the existing UpCloud VM if needed
-		logger.Info("Checking for updates to UpCloud VM")
+		logger.Info("Updating to UpCloud VM")
 		err := r.updateUpCloudVM(svc, &upCloudVM)
 		if err != nil {
 			logger.Error(err, "Failed to update UpCloud VM")
@@ -99,8 +100,8 @@ func (r *UpCloudVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-// getservice initializes the UpCloud API client
-func (r *UpCloudVMReconciler) getservice() (error, *service.Service) {
+// getService initializes the UpCloud API client
+func (r *UpCloudVMReconciler) getService() (error, *service.Service) {
 	username := os.Getenv("UPCLOUD_USERNAME")
 	password := os.Getenv("UPCLOUD_PASSWORD")
 
@@ -113,8 +114,41 @@ func (r *UpCloudVMReconciler) getservice() (error, *service.Service) {
 		fmt.Fprintln(os.Stderr, "Password must be specified")
 		return errors.New("Password must be specified"), nil
 	}
-	c := upCloudClient.New(username, password)
-	return nil, service.New(c)
+	svc := service.New(upCloudClient.New(username, password))
+
+	_, err := svc.GetAccount(context.Background())
+	if err != nil {
+		// `upcloud.Problem` is the error object returned by all of the `Service` methods.
+		//  You can differentiate between generic connection errors (like the API not being reachable) and service errors, which are errors returned in the response body by the API;
+		//	this is useful for gracefully recovering from certain types of errors;
+		var problem *upcloud.Problem
+
+		if errors.As(err, &problem) {
+			fmt.Println(problem.Status)        // HTTP status code returned by the API
+			fmt.Print(problem.Title)           // Short, human-readable description of the problem
+			fmt.Println(problem.CorrelationID) // Unique string that identifies the request that caused the problem; note that this field is not always populated
+			fmt.Println(problem.InvalidParams) // List of invalid request parameters
+
+			for _, invalidParam := range problem.InvalidParams {
+				fmt.Println(invalidParam.Name)   // Path to the request field that is invalid
+				fmt.Println(invalidParam.Reason) // Human-readable description of the problem with that particular field
+			}
+			// You can also check against the specific api error codes to programatically react to certain situations.
+			// Base `upcloud` package exports all the error codes that API can return.
+			// You can check which error code is return in which situation in UpCloud API docs -> https://developers.upcloud.com/1.3
+			if problem.ErrorCode() == upcloud.ErrCodeResourceAlreadyExists {
+				fmt.Println("Looks like we don't need to create this")
+			}
+			// `upcloud.Problem` implements the Error interface, so you can also just use it as any other error
+			fmt.Println(fmt.Errorf("we got an error from the UpCloud API: %w", problem))
+		} else {
+			// This means you got an error, but it does not come from the API itself. This can happen, for example, if you have some connection issues,
+			// or if the UpCloud API is unreachable for some other reason
+			fmt.Println("We got a generic error!")
+		}
+		return err, nil
+	}
+	return nil, svc
 }
 
 // add Finalizer to resource
@@ -129,33 +163,58 @@ func (r *UpCloudVMReconciler) addFinalizer(ctx context.Context, vm *v1alpha1.UpC
 // createUpCloudVM calls the UpCloud API to create a new VM
 func (r *UpCloudVMReconciler) createUpCloudVM(svc *service.Service, vm *v1alpha1.UpCloudVM) (string, string, error) {
 	// Use the UpCloud API to create a new VM
-	serverDetails, err := svc.CreateServer(context.Background(), &request.CreateServerRequest{
+	ctx := context.Background()
+	serverDetails, err := svc.CreateServer(ctx, &request.CreateServerRequest{
 		Title: vm.Name,
 		Plan:  vm.Spec.Plan,
 		Zone:  vm.Spec.Zone,
 		StorageDevices: []request.CreateServerStorageDevice{
 			{
 				Action:  "clone",
-				Storage: vm.Spec.Template,
-				Size:    vm.Spec.Storage,
+				Storage: vm.Spec.StorageTemplate,
+				Title:   vm.Name,
+				Size:    vm.Spec.StorageSize,
 				Tier:    "maxiops",
 			},
 		},
 		CoreNumber:   vm.Spec.CPU,
 		MemoryAmount: vm.Spec.Memory,
+		LoginUser:    vm.Spec.LoginUser,
+		UserData:     vm.Spec.UserData,
+		Networking: &request.CreateServerNetworking{
+			Interfaces: []request.CreateServerInterface{
+				{
+					IPAddresses: []request.CreateServerIPAddress{
+						{
+							Family: upcloud.IPAddressFamilyIPv4,
+						},
+					},
+					Type: upcloud.NetworkTypeUtility,
+				},
+			},
+		},
 		// Add more parameters as needed
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create UpCloud VM: %w", err)
 	}
 
+	serverDetails, err = svc.WaitForServerState(ctx, &request.WaitForServerStateRequest{
+		UUID:         serverDetails.UUID,
+		DesiredState: upcloud.ServerStateStarted,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to wait for server: %#v", err)
+		return "", "", err
+	}
+
+	fmt.Printf("Created UpCloud VM: %#v\n", serverDetails)
 	return serverDetails.UUID, serverDetails.IPAddresses[0].Address, nil
 }
 
 // updateUpCloudVM updates the UpCloud VM based on the changes in the Spec
 func (r *UpCloudVMReconciler) updateUpCloudVM(svc *service.Service, vm *v1alpha1.UpCloudVM) error {
-	// Implement logic to update the UpCloud VM based on changes in the Spec
-	// For example, adjust CPU, memory, etc.
+	// TODO: Update VM Spec
 	return nil
 }
 
