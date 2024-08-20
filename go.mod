@@ -11,8 +11,6 @@ require (
 )
 
 require (
-	github.com/UpCloudLtd/upcloud-go-api v0.0.0-20210930073303-cc664e35078d
-	github.com/UpCloudLtd/upcloud-go-api/v6 v6.12.0
 	github.com/UpCloudLtd/upcloud-go-api/v8 v8.7.1
 	github.com/antlr/antlr4/runtime/Go/antlr/v4 v4.0.0-20230305170008-8188dc5388df // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -24,7 +22,7 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.0 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
-	github.com/go-logr/logr v1.4.1 // indirect
+	github.com/go-logr/logr v1.4.1
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
