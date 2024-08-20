@@ -21,9 +21,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // UpCloudVMSpec defines the desired state of UpCloudVM
 type UpCloudVMSpec struct {
 	CPU             int                `json:"cpu"`
@@ -31,9 +28,13 @@ type UpCloudVMSpec struct {
 	StorageSize     int                `json:"storagesize"`
 	Zone            string             `json:"zone"`
 	Plan            string             `json:"plan"`
+	TimeZone        string             `json:"timezone"`
 	StorageTemplate string             `json:"storagetemplate"`
 	LoginUser       *request.LoginUser `json:"login_user,omitempty"`
 	UserData        string             `json:"user_data,omitempty"`
+
+	//Comment for further improvement:
+	// - What is the size limit for this UserData? if it has the same size limit as OpenStack, then we might need to encode it with base64
 }
 
 // UpCloudVMStatus defines the observed state of UpCloudVM

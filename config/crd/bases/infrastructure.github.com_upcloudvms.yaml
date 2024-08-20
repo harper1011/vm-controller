@@ -65,6 +65,8 @@ spec:
                 type: integer
               storagetemplate:
                 type: string
+              timezone:
+                type: string
               user_data:
                 type: string
               zone:
@@ -75,6 +77,7 @@ spec:
             - plan
             - storagesize
             - storagetemplate
+            - timezone
             - zone
             type: object
           status:

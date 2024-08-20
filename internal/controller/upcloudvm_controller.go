@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/UpCloudLtd/upcloud-go-api/v6/upcloud"
+	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
 	upCloudClient "github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/client"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/request"
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud/service"
@@ -90,7 +90,8 @@ func (r *UpCloudVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	} else {
 		// Check and update the existing UpCloud VM if needed
 		logger.Info("Updating to UpCloud VM")
-		err := r.updateUpCloudVM(svc, &upCloudVM)
+		vmID, err := r.updateUpCloudVM(svc, &upCloudVM)
+		upCloudVM.Status.VMID = vmID
 		if err != nil {
 			logger.Error(err, "Failed to update UpCloud VM")
 			return ctrl.Result{}, err
@@ -165,9 +166,10 @@ func (r *UpCloudVMReconciler) createUpCloudVM(svc *service.Service, vm *v1alpha1
 	// Use the UpCloud API to create a new VM
 	ctx := context.Background()
 	serverDetails, err := svc.CreateServer(ctx, &request.CreateServerRequest{
-		Title: vm.Name,
-		Plan:  vm.Spec.Plan,
-		Zone:  vm.Spec.Zone,
+		Title:    vm.Name,
+		Plan:     vm.Spec.Plan,
+		Zone:     vm.Spec.Zone,
+		TimeZone: vm.Spec.TimeZone,
 		StorageDevices: []request.CreateServerStorageDevice{
 			{
 				Action:  "clone",
@@ -213,9 +215,48 @@ func (r *UpCloudVMReconciler) createUpCloudVM(svc *service.Service, vm *v1alpha1
 }
 
 // updateUpCloudVM updates the UpCloud VM based on the changes in the Spec
-func (r *UpCloudVMReconciler) updateUpCloudVM(svc *service.Service, vm *v1alpha1.UpCloudVM) error {
-	// TODO: Update VM Spec
-	return nil
+func (r *UpCloudVMReconciler) updateUpCloudVM(svc *service.Service, vm *v1alpha1.UpCloudVM) (string, error) {
+	ctx := context.Background()
+	// Get existing VM details
+	serverDetails, err := svc.GetServerDetails(ctx, &request.GetServerDetailsRequest{
+		UUID: vm.Status.VMID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to get UpCloud VM: %w", err)
+	}
+
+	newLabelSlice := serverDetails.Labels
+	existTitle := serverDetails.Title
+	newTitle := vm.Name
+	if existTitle != newTitle {
+		newLabelSlice = append(newLabelSlice, upcloud.Label{Key: "title", Value: newTitle})
+	}
+
+	serverDetails, err = svc.ModifyServer(ctx, &request.ModifyServerRequest{
+		Labels:       &newLabelSlice,
+		UUID:         serverDetails.UUID,
+		Title:        newTitle,
+		Plan:         vm.Spec.Plan,
+		Zone:         vm.Spec.Zone,
+		CoreNumber:   vm.Spec.CPU,
+		TimeZone:     vm.Spec.TimeZone,
+		MemoryAmount: vm.Spec.Memory,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to modify UpCloud VM: %w", err)
+	}
+
+	serverDetails, err = svc.WaitForServerState(ctx, &request.WaitForServerStateRequest{
+		UUID:         serverDetails.UUID,
+		DesiredState: upcloud.ServerStateStarted,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to wait for server: %#v", err)
+		return "", err
+	}
+
+	fmt.Printf("Updated UpCloud VM: %#v\n", serverDetails)
+	return serverDetails.UUID, nil
 }
 
 // deleteUpCloudVM deletes the UpCloud VM
