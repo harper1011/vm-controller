@@ -27,73 +27,79 @@ type UpCloudVMReconciler struct {
 	Logger logr.Logger
 }
 
+const (
+	UPCloudFinalizer = "upcloud.finalizer"
+)
+
 // Reconcile is part of the main Kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state specified by the user.
 // This function handles the creation, updating, and deletion of UpCloud VMs.
 // For more details, check Reconcile and its result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.10.0/pkg/reconcile
 func (r *UpCloudVMReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	r.Logger = log.FromContext(ctx)
 
 	// Fetch the UpCloudVM resource
 	var upCloudVM v1alpha1.UpCloudVM
 	if err := r.Get(ctx, req.NamespacedName, &upCloudVM); err != nil {
 		if apiError.IsNotFound(err) {
-			// The resource was deleted
-			logger.Info("UpCloudVM resource not found. skip...")
+			r.Logger.Info("UpCloudVM resource not found. skip...")
 			return ctrl.Result{}, nil
 		}
 		// Error fetching the resource, requeue the request
-		logger.Error(err, "Failed to get UpCloudVM")
+		r.Logger.Error(err, "Failed to get UpCloudVM")
 		return ctrl.Result{}, err
 	}
-
-	// Initialize the UpCloud API client
+	// Initialize the UpCloud API client and get service object
 	err, svc := r.getService()
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+
 	// Handle deletion logic
 	if !upCloudVM.ObjectMeta.DeletionTimestamp.IsZero() {
-		logger.Info("Deleting UpCloud VM")
+		r.Logger.Info("Deleting UpCloud VM")
 		if err := r.deleteUpCloudVM(svc, &upCloudVM); err != nil {
-			logger.Error(err, "Failed to delete UpCloud VM")
+			r.Logger.Error(err, "Failed to delete UpCloud VM")
 			return ctrl.Result{}, err
 		}
+		// Remove Finalizer from VM deletion
+		upCloudVM.ObjectMeta.Finalizers = removeString(upCloudVM.ObjectMeta.Finalizers, UPCloudFinalizer)
+		if err := r.Update(ctx, &upCloudVM); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
+	// Create or update the UpCloud VM
 	// Add finalizer for this CR
-	if !containsString(upCloudVM.GetFinalizers(), "upcloud.finalizer") {
+	if !containsString(upCloudVM.GetFinalizers(), UPCloudFinalizer) {
 		if err := r.addFinalizer(ctx, &upCloudVM); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-
-	// Create or update the UpCloud VM
 	if upCloudVM.Status.VMID == "" {
-		// Call UpCloud API to create a new VM
-		logger.Info("Creating new UpCloud VM")
+		// Create a new VM
+		r.Logger.Info("Creating new UpCloud VM")
 		vmID, ip, err := r.createUpCloudVM(svc, &upCloudVM)
 		if err != nil {
-			logger.Error(err, "Failed to create UpCloud VM")
+			r.Logger.Error(err, "Failed to create UpCloud VM")
 			return ctrl.Result{}, err
 		}
-
-		// Update the status with VM details
 		upCloudVM.Status.VMID = vmID
 		upCloudVM.Status.IPAddress = ip
 		upCloudVM.Status.State = "Running"
 		if err := r.Status().Update(ctx, &upCloudVM); err != nil {
-			logger.Error(err, "Failed to update UpCloudVM status")
+			r.Logger.Error(err, "Failed to update UpCloudVM status")
 			return ctrl.Result{}, err
 		}
 	} else {
-		// Check and update the existing UpCloud VM if needed
-		logger.Info("Updating to UpCloud VM")
+		// Check and update the existing UpCloud VM
+		r.Logger.Info("Updating to UpCloud VM")
 		vmID, err := r.updateUpCloudVM(svc, &upCloudVM)
 		upCloudVM.Status.VMID = vmID
 		if err != nil {
-			logger.Error(err, "Failed to update UpCloud VM")
+			r.Logger.Error(err, "Failed to update UpCloud VM")
 			return ctrl.Result{}, err
 		}
 	}
@@ -117,6 +123,8 @@ func (r *UpCloudVMReconciler) getService() (error, *service.Service) {
 	}
 	svc := service.New(upCloudClient.New(username, password))
 
+	// Following is some copied code from UpCloud Go SDK for error handling
+	// https://github.com/UpCloudLtd/upcloud-go-api?tab=readme-ov-file#error-handling
 	_, err := svc.GetAccount(context.Background())
 	if err != nil {
 		// `upcloud.Problem` is the error object returned by all of the `Service` methods.
@@ -154,7 +162,7 @@ func (r *UpCloudVMReconciler) getService() (error, *service.Service) {
 
 // add Finalizer to resource
 func (r *UpCloudVMReconciler) addFinalizer(ctx context.Context, vm *v1alpha1.UpCloudVM) error {
-	vm.SetFinalizers(append(vm.GetFinalizers(), "upcloud.finalizer"))
+	vm.SetFinalizers(append(vm.GetFinalizers(), UPCloudFinalizer))
 	if err := r.Update(ctx, vm); err != nil {
 		return err
 	}
@@ -195,7 +203,6 @@ func (r *UpCloudVMReconciler) createUpCloudVM(svc *service.Service, vm *v1alpha1
 				},
 			},
 		},
-		// Add more parameters as needed
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create UpCloud VM: %w", err)
@@ -225,13 +232,14 @@ func (r *UpCloudVMReconciler) updateUpCloudVM(svc *service.Service, vm *v1alpha1
 		return "", fmt.Errorf("failed to get UpCloud VM: %w", err)
 	}
 
+	// Update labels if VM name changed
 	newLabelSlice := serverDetails.Labels
 	existTitle := serverDetails.Title
 	newTitle := vm.Name
 	if existTitle != newTitle {
 		newLabelSlice = append(newLabelSlice, upcloud.Label{Key: "title", Value: newTitle})
 	}
-
+	// Update VM server
 	serverDetails, err = svc.ModifyServer(ctx, &request.ModifyServerRequest{
 		Labels:       &newLabelSlice,
 		UUID:         serverDetails.UUID,
@@ -245,7 +253,7 @@ func (r *UpCloudVMReconciler) updateUpCloudVM(svc *service.Service, vm *v1alpha1
 	if err != nil {
 		return "", fmt.Errorf("failed to modify UpCloud VM: %w", err)
 	}
-
+	// Wait updated VM server to be ready
 	serverDetails, err = svc.WaitForServerState(ctx, &request.WaitForServerStateRequest{
 		UUID:         serverDetails.UUID,
 		DesiredState: upcloud.ServerStateStarted,
@@ -271,7 +279,6 @@ func (r *UpCloudVMReconciler) deleteUpCloudVM(svc *service.Service, vm *v1alpha1
 	if err != nil {
 		return fmt.Errorf("failed to delete UpCloud VM: %w", err)
 	}
-
 	return nil
 }
 
